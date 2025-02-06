@@ -21,7 +21,7 @@ def main():
     """
     Main function to run the training and evaluation.
     """
-    seeds = [1, 23, 42]
+    seeds = [1]
 
     # Early stopping parameters
     patience = 100

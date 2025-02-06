@@ -90,6 +90,7 @@ def train(model: torch.nn.Module, train_loader: torch.utils.data.DataLoader, opt
         data = data.to(device)
         optimizer.zero_grad()
         output = model(data)
+        #print(output)
         loss = criterion(output, data.y)
         loss.backward()
         optimizer.step()
@@ -107,25 +108,6 @@ def train(model: torch.nn.Module, train_loader: torch.utils.data.DataLoader, opt
             "Learning Rate": current_lr
         })
 
-        # Dictionary to store individual graph details
-        graph_details = {}
-
-        # Calculate RMSE for each graph in the batch
-        for idx in range(data.num_graphs):
-            prediction = convert_output_eval(output[idx], data[idx], 'prediction', device)
-            actual = convert_output_eval(data.y[idx], data[idx], 'target', device)
-
-            mse = mean_squared_error(actual.cpu().numpy(), prediction.cpu().numpy())
-            rmse = math.sqrt(mse)
-            perc_completion = data.perc_completion[idx].item()
-
-            # print(f"Graph {idx} {step} completion RMSE: {rmse}")
-
-            # Storing the metrics in the dictionary with graph id as key
-            graph_details[idx] = {'rmse': rmse, 'perc_completion': perc_completion}
-
-        # Append to the detailed metrics dict
-        detailed_metrics.append(graph_details)
 
     # Return the average loss tracked by AverageMeter
     return loss_meter.avg, detailed_metrics
@@ -158,6 +140,7 @@ def validate(model: torch.nn.Module, validate_loader: torch.utils.data.DataLoade
         for data in validate_loader:
             data = data.to(device)
             output = model(data)
+            #print(output)
 
             if test_loader:
                 # Assuming the jammer power is the last element in each output tensor within the batch
@@ -167,8 +150,6 @@ def validate(model: torch.nn.Module, validate_loader: torch.utils.data.DataLoade
 
                 # Including the jammer power predictions and actuals directly without adding an extra dimension
                 predicted_coords = torch.cat([predicted_coords_transformed, output[:, -1:]], dim=1)
-                predictions.append(predicted_coords.cpu().numpy())
-                predicted_coords = convert_output_eval(output, data, 'prediction', device)
                 predictions.append(predicted_coords.cpu().numpy())
 
                 if not params['inference']:
@@ -188,6 +169,7 @@ def validate(model: torch.nn.Module, validate_loader: torch.utils.data.DataLoade
 
                 # Calculate RMSE for each graph in the batch
                 for idx in range(data.num_graphs):
+                    #print(data.num_graphs)
                     # Transform the coordinates excluding the jammer power
                     prediction_transformed = convert_output_eval(output[idx][:-1], data[idx], 'prediction', device)
                     actual_transformed = convert_output_eval(data.y[idx][:-1], data[idx], 'target', device)
@@ -211,7 +193,7 @@ def validate(model: torch.nn.Module, validate_loader: torch.utils.data.DataLoade
 
                 # Append to the detailed metrics dict
                 detailed_metrics.append(graph_details)
-
+                #print(loss.item())
                 # Update AverageMeter with the current RMSE and number of graphs
                 loss_meter.update(loss.item(), data.num_graphs)
 

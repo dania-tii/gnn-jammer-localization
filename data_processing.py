@@ -1211,7 +1211,7 @@ def create_torch_geo_data(instance: Instance) -> Data:
 
     if not params['inference']:
         # Assuming instance.jammer_position is a list or array that can be reshaped
-        jammer_positions = np.array(instance.jammer_position).reshape(-1, params['out_features'])
+        jammer_positions = np.array(instance.jammer_position).reshape(-1, 2)
 
         # Convert jammer_positions to a tensor
         y = torch.tensor(jammer_positions, dtype=torch.float)

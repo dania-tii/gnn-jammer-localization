@@ -112,8 +112,8 @@ def train(model: torch.nn.Module, train_loader: torch.utils.data.DataLoader, opt
 
         # Calculate RMSE for each graph in the batch
         for idx in range(data.num_graphs):
-            prediction = convert_output_eval(output[idx], data[idx], 'prediction', device)
-            actual = convert_output_eval(data.y[idx], data[idx], 'target', device)
+            prediction = convert_output_eval(output[idx, :-1], data[idx], 'prediction', device)
+            actual = convert_output_eval(data.y[idx, :-1], data[idx], 'target', device)
 
             mse = mean_squared_error(actual.cpu().numpy(), prediction.cpu().numpy())
             rmse = math.sqrt(mse)
@@ -300,3 +300,4 @@ def plot_network_with_rssi(node_positions, final_rssi, jammer_position, noise_fl
     plt.grid(True)
     plt.legend()
     plt.show()
+

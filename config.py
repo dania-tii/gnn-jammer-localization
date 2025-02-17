@@ -24,7 +24,7 @@ params = {
     'grid_meters': 1,
     'ds_method': 'hybrid', # time_window_avg, noise
     'experiments_folder': 'exp_jtx/gat/',
-    'dataset_path': 'data/modified_interpolated_controlled_path_data_1000.pkl',  # combined_fspl_log_distance.csv',  # combined_urban_area.csv
+    'dataset_path': 'data/modified_interpolated_controlled_path_data_1000_updated_aoa.pkl',  # combined_fspl_log_distance.csv',  # combined_urban_area.csv
     'test_sets': ['guided_path_data_test_set.csv', 'linear_path_data_test_set.csv'],
     'dynamic': True,
     'train_per_class': False,
@@ -32,7 +32,7 @@ params = {
     'inference': False,
     'reproduce': True,
     'plot_network': False,
-    'study': 'downsampling',  # dataset, coord_system, feat_engineering, knn_edges, downsampling
+    'study': 'dataset',  # dataset, coord_system, feat_engineering, knn_edges, downsampling
     'val_discrite_coeff': 0.25,
     'test_discrite_coeff': 0.1,  # disable discritization -> step_size = 1
     'num_workers': 16,

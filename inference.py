@@ -44,7 +44,7 @@ def plot_positions(data, jammer_position, predicted_position):
     plt.figure(figsize=(8, 6))
     plt.scatter(node_positions[:, 0], node_positions[:, 1], c='blue', label='Nodes', s=1, alpha=0.5)
     plt.scatter(jammer_position[0], jammer_position[1], c='red', marker='x', s=5, label='Jammer')
-    plt.scatter(predicted_position[0][0], predicted_position[0][1], c='green', marker='o', s=5, label='Prediction', alpha=0.5)
+    plt.scatter(predicted_position[0], predicted_position[1], c='green', marker='o', s=5, label='Prediction', alpha=0.5)
     plt.title('Node and Jammer Positions')
     plt.xlabel('X coordinate')
     plt.ylabel('Y coordinate')
@@ -53,7 +53,7 @@ def plot_positions(data, jammer_position, predicted_position):
     plt.show()
 
 def calculate_rmse(predicted_position, actual_position):
-    rmse = np.sqrt(mean_squared_error([actual_position], [predicted_position[0]]))
+    rmse = np.sqrt(mean_squared_error(actual_position, predicted_position))
     return rmse
 
 def gnn(data, plexp):
@@ -62,11 +62,12 @@ def gnn(data, plexp):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     test_dataset = TemporalGraphDataset(data, test=True, discretization_coeff=1.0)
     test_loader = DataLoader(test_dataset, batch_size=gnn_params['batch_size'], shuffle=False, drop_last=False, pin_memory=True, num_workers=gnn_params['num_workers'])
-    model_path = 'trained_model_GAT_cartesian_knnfc_minmax_400hybrid_combined.pth'
+    model_path = 'trained_model_GAT_cartesian_knnfc_unit_sphere_400hybrid_combined.pth'
     model, optimizer, scheduler, criterion = initialize_model(device, gnn_params, len(test_loader))
     model.load_state_dict(torch.load(model_path))
     predictions, _, _ = validate(model, test_loader, criterion, device, test_loader=True)
-    predicted_position, predicted_P_tx_jammer = predictions[0], predictions[2]
+    print(predictions)
+    predicted_position, predicted_P_tx_jammer = predictions[0][:2], predictions[0][2]
     distance = calculate_interference_range(predicted_P_tx_jammer, plexp)
     return predicted_position, predicted_P_tx_jammer, distance
 
@@ -85,7 +86,7 @@ print(f"Ptx jammer: {jammer_ptx}, Gtx jammer: {jammer_gtx}, PL: {plexp}, Sigma: 
 data = generate_dummy_data(num_samples, jammer_pos, jammer_ptx, jammer_gtx, plexp, sigma)
 predicted_jammer_pos, predicted_jammer_ptx, predicted_distance = gnn(data, plexp)
 plot_positions(data, jammer_pos, predicted_jammer_pos)
-rmse = calculate_rmse(predicted_jammer_pos, jammer_pos)
+rmse = calculate_rmse(predicted_jammer_pos.tolist(), jammer_pos)
 print("Predicted Jammer Position:", predicted_jammer_pos)
 print(f"RMSE: {round(rmse, 2)} m")
 

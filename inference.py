@@ -61,14 +61,15 @@ def gnn(data):
     # Add jammed column
     data = add_jammed_column(data, threshold=-55)
     # Set the device to use for computations
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cpu'
     # Initialize data loader
     test_dataset = TemporalGraphDataset(data, test=True, discretization_coeff=1.0)
-    test_loader = DataLoader(test_dataset, batch_size=gnn_params['batch_size'], shuffle=False, drop_last=False, pin_memory=True, num_workers=gnn_params['num_workers'])
+    test_loader = DataLoader(test_dataset, batch_size=gnn_params['batch_size'], shuffle=False, drop_last=False, pin_memory=True, num_workers=0)
     # Load trained model
     model_path = 'trained_model_GAT_cartesian_knnfc_minmax_400hybrid_combined.pth'
     model, optimizer, scheduler, criterion = initialize_model(device, gnn_params, len(test_loader))
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu'), weights_only=False))
     # Predict jammer position
     predictions, _, _ = validate(model, test_loader, criterion, device, test_loader=True)
     return predictions

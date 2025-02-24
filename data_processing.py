@@ -306,7 +306,7 @@ def apply_min_max_normalization_instance(instance):
         instance.jammer_position = jammer_position
 
 
-def apply_unit_sphere_normalization(data):
+def apply_unit_sphere_normalization(instance):
     """
     Apply unit sphere normalization to position data.
 
@@ -316,30 +316,29 @@ def apply_unit_sphere_normalization(data):
     Returns:
     tuple: A tuple containing the normalized positions and the maximum radius.
     """
-    logging.info("Applying unit sphere normalization")
-    # Initialize a column for maximum radius
-    data['max_radius'] = None
+    # logging.info("Applying unit sphere normalization")
 
-    for idx, row in data.iterrows():
-        # Extract positions from the current row
-        positions = np.array(row['node_positions'])
-        jammer_position = np.array(row['jammer_position'])
+    # Extract positions from the current row
+    positions = instance.node_positions
+    if not params['inference']:
+        jammer_position = instance.jammer_position
 
-        # Calculate the maximum radius from the centroid
-        max_radius = np.max(np.linalg.norm(positions, axis=1))
+    # Calculate the maximum radius from the centroid
+    max_radius = np.max(np.linalg.norm(positions, axis=1))
 
-        # Check for zero radius to prevent division by zero
-        if max_radius == 0:
-            raise ValueError("Max radius is zero, normalization cannot be performed.")
+    # Check for zero radius to prevent division by zero
+    if max_radius == 0:
+        raise ValueError("Max radius is zero, normalization cannot be performed.")
 
-        # Normalize the positions uniformly
-        normalized_positions = positions / max_radius
+    # Normalize the positions uniformly
+    normalized_positions = positions / max_radius
+    if not params['inference']:
         normalized_jammer_position = jammer_position / max_radius
 
-        # Update the DataFrame with normalized positions and maximum radius
-        data.at[idx, 'node_positions'] = normalized_positions.tolist()
-        data.at[idx, 'jammer_position'] = normalized_jammer_position.tolist()
-        data.at[idx, 'max_radius'] = max_radius
+    instance.node_positions = normalized_positions
+    if not params['inference']:
+        instance.jammer_position = normalized_jammer_position
+    instance.max_radius = max_radius
 
 
 def convert_data_type(data, load_saved_data):
@@ -1158,6 +1157,8 @@ def create_torch_geo_data(instance: Instance) -> Data:
     center_coordinates_instance(instance)
     if params['norm'] == 'minmax':
         apply_min_max_normalization_instance(instance)
+    elif params['norm'] == 'unit_sphere':
+        apply_unit_sphere_normalization(instance)
 
     if 'angle_of_arrival' in params['required_features']:
         # Convert AoA from degrees to radians

@@ -2,12 +2,13 @@ params = {
     'model': 'GAT',
     'learning_rate': 0.0006703373871168542,
     'weight_decay': 0.00005,
+    'test_batch_size': 8,
     'batch_size': 8,
     'dropout_rate': 0.5,
     'num_heads': 4,
     'num_layers': 8,
-    'hidden_channels': 256,
-    'out_channels': 256,
+    'hidden_channels': 128,
+    'out_channels': 128, 
     'out_features': 2,  # 3 jammer pos (x, y, z) # 5 (r, sin(theta), cos(theta), sin(phi), cos(phi))
     'max_epochs': 800,
     '3d': False,
@@ -16,7 +17,7 @@ params = {
     'additional_features': ['mean_noise', 'std_noise', 'range_noise', 'dist_to_centroid', 'sin_azimuth', 'cos_azimuth'],
     'num_neighbors': 'fc',
     'edges': 'knn',  # opts: 'knn', 'proximity'
-    'norm': 'minmax',  # opts: 'minmax', 'unit_sphere'
+    'norm': 'unit_sphere',  # opts: 'minmax', 'unit_sphere'
     'activation': False,
     'max_nodes': 400,
     'filtering_proportion': 0.6,

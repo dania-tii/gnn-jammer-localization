@@ -14,6 +14,29 @@ from data_processing import TemporalGraphDataset, add_jammed_column
 from train import initialize_model, validate
 from sklearn.metrics import mean_squared_error
 
+def gps_to_2d(lat, lon, radius=6378137.0):
+    """
+    Converts GPS (latitude, longitude) to 2D Cartesian coordinates using Mercator Projection.
+    """
+    # Convert degrees to radians
+    lat_rad = math.radians(lat)
+    lon_rad = math.radians(lon)
+
+    # Mercator projection formulas
+    x = radius * lon_rad
+    y = radius * math.log(math.tan(math.pi / 4 + lat_rad / 2))
+
+    return x, y
+
+def twod_to_gps(x, y, radius=6378137.0):
+    """
+    Converts 2D Cartesian coordinates back to GPS (latitude, longitude) using Mercator Projection.
+    """
+    lon = math.degrees(x / radius)
+    lat = math.degrees(2 * math.atan(math.exp(y / radius)) - math.pi / 2)
+
+    return lat, lon
+
 def gps_to_cartesian(lat, lon, alt=0):
     # Constants for WGS84
     a = 6378137.0  # Semi-major axis
@@ -110,23 +133,39 @@ def calculate_rmse(predicted_position, actual_position):
     rmse = np.sqrt(mean_squared_error([actual_position], [predicted_position[0]]))
     return rmse
 
-def gnn(data):
-    gnn_params.update({'inference': True})
-    # Add jammed column
-    data = add_jammed_column(data, threshold=-55)
-    # Set the device to use for computations
-    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = 'cpu'
-    # Initialize data loader
+def load_gnn():
+    model_path = 'trained_model_GAT_cartesian_knnfc_unit_sphere_400hybrid_combined.pth'
+    #model_path = 'trained_model_GAT_cartesian_knnfc_minmax_400hybrid_combined.pth'
+    model, optimizer, scheduler, criterion = initialize_model('cpu', gnn_params, 1)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu'), weights_only=False))
+    return model, criterion
+
+def gnn(model, criterion, data):
     test_dataset = TemporalGraphDataset(data, test=True, discretization_coeff=1.0)
     test_loader = DataLoader(test_dataset, batch_size=gnn_params['batch_size'], shuffle=False, drop_last=False, pin_memory=True, num_workers=0)
-    # Load trained model
-    model_path = 'trained_model_GAT_cartesian_knnfc_minmax_400hybrid_combined.pth'
-    model, optimizer, scheduler, criterion = initialize_model(device, gnn_params, len(test_loader))
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu'), weights_only=False))
-    # Predict jammer position
-    predictions, _, _ = validate(model, test_loader, criterion, device, test_loader=True)
+    predictions, _, _ = validate(model, test_loader, criterion, 'cpu', test_loader=True)
     return predictions
+
+def haversine(lat1, lon1, lat2, lon2):
+    # Convert degrees to radians
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    # Haversine formula
+    delta_lat = lat2_rad - lat1_rad
+    delta_lon = lon2_rad - lon1_rad
+
+    a = math.sin(delta_lat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    # Earth radius in meters (mean radius)
+    R = 6371000.0
+
+    # Calculate distance
+    distance = R * c
+    return distance
 
 ## Example usage
 #num_samples = 1000
@@ -149,68 +188,75 @@ async def main():
     print("conn ok")
     sub = await conn.subscribe("telemetry.current_location")
 
-    jammer_ptx = np.random.uniform(20, 40)
-    jammer_gtx = np.random.uniform(0, 5)
-    plexp = 3.5
-    sigma = np.random.uniform(2, 6)
+    jammer_ptx = 40 #np.random.uniform(20, 40)
+    jammer_gtx = 2 #np.random.uniform(0, 5)
+    plexp = 3
+    sigma = 2 #np.random.uniform(2, 6)
     print(f"Ptx jammer: {jammer_ptx}, Gtx jammer: {jammer_gtx}, PL: {plexp}, Sigma: {sigma}")
 
-    jammer_pos = None
-    db = dict()
+    gnn_params.update({'inference': True})
+    model, criterion = load_gnn()
 
+    jammer_pos = None
+    all_positions = []
+    all_noises = []
+    pos_jammed = None
+
+    gotSomeData = 0
     async for msg in sub.messages:
         #print(f"Received a message on '{msg.subject} {msg.reply}': {msg.data.decode()}")
         #{"device_id":"dev_pmc01","ts":"2025-01-20T10:47:55.200333347Z","payload":{"current_position":{"lat":24.436311225969455,"lon":54.61389614281878,"alt":0},"distance":0}}
         location_msg = json.loads(msg.data, object_hook=lambda d: SimpleNamespace(**d))
         #print("location message:", location_msg)
 
-        pos = gps_to_cartesian(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon, location_msg.payload.current_position.alt)
+        #pos = gps_to_cartesian(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon, location_msg.payload.current_position.alt)
+        pos = gps_to_2d(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon)
         did = location_msg.device_id
 
-        gotSomeData = False
+        #gotSomeData = False
 
         if did == "dev_pmc01":
             continue
         elif did == "mercury42f0135a7d9f870":
             jammer_pos = pos
-            print("jammer position set:", jammer_pos)
+            #print("jammer position set:", jammer_pos)
         else:
-            if did in db:
-                db[did] += [pos]
-            else:
-                db[did] = [pos]
+            if jammer_pos is not None:
+                all_positions += [pos]
+                distance = np.sqrt((pos[0] - jammer_pos[0]) ** 2 + (pos[1] - jammer_pos[1]) ** 2)
+                noise = calculate_noise(distance, jammer_ptx, jammer_gtx, plexp, sigma)
+                all_noises += [noise]
+                #print(len(all_positions), len(all_noises))
+                #gotSomeData = True
+                gotSomeData += 1
 
-            gotSomeData = True
-
-        if jammer_pos is not None and gotSomeData:
-            all_positions = []
-            all_noises = []
-            for key in db:
-                positions = db[key]
-                distances = np.array(list(map(lambda pos: np.sqrt((pos[0] - jammer_pos[0]) ** 2 + (pos[1] - jammer_pos[1]) ** 2), positions)))
-                noises = calculate_noise(distances, jammer_ptx, jammer_gtx, plexp, sigma)
-                #print()
-                #print(positions)
-                #print(distances)
-                #print(noises)
-                #print()
-                #print("positions:", positions, "distances:", distances, "noises:", noises)
-                all_positions += positions
-                all_noises += noises.tolist()
-
+        #if gotSomeData:
+        if gotSomeData > 15:
+            gotSomeData = 0
             try:
+                #print(all_noises)
                 data = pd.DataFrame({
                     'node_positions': [all_positions],
                     'node_noise': [all_noises]
                 })
-                predicted_jammer_pos = gnn(data)
-                print("Predicted Jammer Position:", predicted_jammer_pos)
-                predicted_gps = cartesian_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1], all_positions[0][2])
-                print(predicted_gps)
-            except:
+                data = add_jammed_column(data, threshold=-55)
+                if pos_jammed is None:
+                    print(data)
+                    pos_jammed = data['node_positions'][0][data['jammed_at'][0]]
+                    pos_jammed = np.array(pos_jammed)
+                predicted_jammer_pos = gnn(model, criterion, data)
+                #print("Predicted Jammer Position:", predicted_jammer_pos)
+                #predicted_gps = cartesian_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1], all_positions[0][2])
+                predicted_gps = twod_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1])
+                print("stuff:", predicted_jammer_pos, predicted_gps, pos_jammed)
+                distance = np.linalg.norm(pos_jammed - np.array(predicted_jammer_pos))
+                print(predicted_gps, distance)
+                print(np.sqrt((predicted_jammer_pos[0][0] - jammer_pos[0]) ** 2 + (predicted_jammer_pos[0][1] - jammer_pos[1]) ** 2))
+            except Exception as e:
+                print(e)
                 continue
 
-            responseb = json.dumps({"predicted": predicted_jammer_pos.tolist(), "predicted_gps": predicted_gps}).encode()
+            responseb = json.dumps({"predicted": predicted_jammer_pos.tolist(), "predicted_gps": predicted_gps, "distance": int(distance)}).encode()
             await conn.publish("srta.jamlocator.prediction", responseb)
 
 

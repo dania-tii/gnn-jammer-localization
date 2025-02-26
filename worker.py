@@ -13,6 +13,7 @@ from config import params as gnn_params
 from data_processing import TemporalGraphDataset, add_jammed_column
 from train import initialize_model, validate
 from sklearn.metrics import mean_squared_error
+from aiostream import stream
 
 def gps_to_2d(lat, lon, radius=6378137.0):
     """
@@ -187,6 +188,7 @@ async def main():
     conn = await nats.connect(servers = os.getenv('NATS_SERVER', 'nats://localhost:4224'))
     print("conn ok")
     sub = await conn.subscribe("telemetry.current_location")
+    cmdsub = await conn.subscribe("srta.jamlocator.command")
 
     jammer_ptx = 40 #np.random.uniform(20, 40)
     jammer_gtx = 2 #np.random.uniform(0, 5)
@@ -201,63 +203,83 @@ async def main():
     all_positions = []
     all_noises = []
     pos_jammed = None
+    running = False
 
     gotSomeData = 0
-    async for msg in sub.messages:
-        #print(f"Received a message on '{msg.subject} {msg.reply}': {msg.data.decode()}")
-        #{"device_id":"dev_pmc01","ts":"2025-01-20T10:47:55.200333347Z","payload":{"current_position":{"lat":24.436311225969455,"lon":54.61389614281878,"alt":0},"distance":0}}
-        location_msg = json.loads(msg.data, object_hook=lambda d: SimpleNamespace(**d))
-        #print("location message:", location_msg)
-
-        #pos = gps_to_cartesian(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon, location_msg.payload.current_position.alt)
-        pos = gps_to_2d(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon)
-        did = location_msg.device_id
-
-        #gotSomeData = False
-
-        if did == "dev_pmc01":
-            continue
-        elif did == "mercury42f0135a7d9f870":
-            jammer_pos = pos
-            #print("jammer position set:", jammer_pos)
-        else:
-            if jammer_pos is not None:
-                all_positions += [pos]
-                distance = np.sqrt((pos[0] - jammer_pos[0]) ** 2 + (pos[1] - jammer_pos[1]) ** 2)
-                noise = calculate_noise(distance, jammer_ptx, jammer_gtx, plexp, sigma)
-                all_noises += [noise]
-                #print(len(all_positions), len(all_noises))
-                #gotSomeData = True
-                gotSomeData += 1
-
-        #if gotSomeData:
-        if gotSomeData > 15:
-            gotSomeData = 0
-            try:
-                #print(all_noises)
-                data = pd.DataFrame({
-                    'node_positions': [all_positions],
-                    'node_noise': [all_noises]
-                })
-                data = add_jammed_column(data, threshold=-55)
-                if pos_jammed is None:
-                    print(data)
-                    pos_jammed = data['node_positions'][0][data['jammed_at'][0]]
-                    pos_jammed = np.array(pos_jammed)
-                predicted_jammer_pos = gnn(model, criterion, data)
-                #print("Predicted Jammer Position:", predicted_jammer_pos)
-                #predicted_gps = cartesian_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1], all_positions[0][2])
-                predicted_gps = twod_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1])
-                print("stuff:", predicted_jammer_pos, predicted_gps, pos_jammed)
-                distance = np.linalg.norm(pos_jammed - np.array(predicted_jammer_pos))
-                print(predicted_gps, distance)
-                print(np.sqrt((predicted_jammer_pos[0][0] - jammer_pos[0]) ** 2 + (predicted_jammer_pos[0][1] - jammer_pos[1]) ** 2))
-            except Exception as e:
-                print(e)
+    combine = stream.merge(sub.messages, cmdsub.messages)
+    async with combine.stream() as streamer:
+        async for msg in streamer:
+            if msg.data == b"start":
+                print("got start")
+                model, criterion = load_gnn()
+                jammer_pos = None
+                all_positions = []
+                all_noises = []
+                running = True
                 continue
 
-            responseb = json.dumps({"predicted": predicted_jammer_pos.tolist(), "predicted_gps": predicted_gps, "distance": int(distance)}).encode()
-            await conn.publish("srta.jamlocator.prediction", responseb)
+            elif msg.data == b"stop":
+                print("got end")
+                running = False
+                continue
+
+            if not running:
+                continue
+
+            #print(f"Received a message on '{msg.subject} {msg.reply}': {msg.data.decode()}")
+            #{"device_id":"dev_pmc01","ts":"2025-01-20T10:47:55.200333347Z","payload":{"current_position":{"lat":24.436311225969455,"lon":54.61389614281878,"alt":0},"distance":0}}
+            location_msg = json.loads(msg.data, object_hook=lambda d: SimpleNamespace(**d))
+            #print("location message:", location_msg)
+
+            #pos = gps_to_cartesian(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon, location_msg.payload.current_position.alt)
+            pos = gps_to_2d(location_msg.payload.current_position.lat, location_msg.payload.current_position.lon)
+            did = location_msg.device_id
+
+            #gotSomeData = False
+
+            if did == "dev_pmc01":
+                continue
+            elif did == "mercury42f0135a7d9f870":
+                jammer_pos = pos
+                #print("jammer position set:", jammer_pos)
+            else:
+                if jammer_pos is not None:
+                    all_positions += [pos]
+                    distance = np.sqrt((pos[0] - jammer_pos[0]) ** 2 + (pos[1] - jammer_pos[1]) ** 2)
+                    noise = calculate_noise(distance, jammer_ptx, jammer_gtx, plexp, sigma)
+                    all_noises += [noise]
+                    #print(len(all_positions), len(all_noises))
+                    #gotSomeData = True
+                    gotSomeData += 1
+
+            #if gotSomeData:
+            if gotSomeData > 15:
+                gotSomeData = 0
+                try:
+                    #print(all_noises)
+                    data = pd.DataFrame({
+                        'node_positions': [all_positions],
+                        'node_noise': [all_noises]
+                    })
+                    data = add_jammed_column(data, threshold=-55)
+                    if pos_jammed is None:
+                        print(data)
+                        pos_jammed = data['node_positions'][0][data['jammed_at'][0]]
+                        pos_jammed = np.array(pos_jammed)
+                    predicted_jammer_pos = gnn(model, criterion, data)
+                    #print("Predicted Jammer Position:", predicted_jammer_pos)
+                    #predicted_gps = cartesian_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1], all_positions[0][2])
+                    predicted_gps = twod_to_gps(predicted_jammer_pos[0][0], predicted_jammer_pos[0][1])
+                    print("stuff:", predicted_jammer_pos, predicted_gps, pos_jammed)
+                    distance = np.linalg.norm(pos_jammed - np.array(predicted_jammer_pos))
+                    print(predicted_gps, distance)
+                    print(np.sqrt((predicted_jammer_pos[0][0] - jammer_pos[0]) ** 2 + (predicted_jammer_pos[0][1] - jammer_pos[1]) ** 2))
+                except Exception as e:
+                    print(e)
+                    continue
+
+                responseb = json.dumps({"predicted": predicted_jammer_pos.tolist(), "predicted_gps": predicted_gps, "distance": int(distance)}).encode()
+                await conn.publish("srta.jamlocator.prediction", responseb)
 
 
 if __name__ == '__main__':
